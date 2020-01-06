@@ -48,6 +48,8 @@ def configure_vm(name, vm, conf)
   end
 
   vm.provider :virtualbox do |vb|
+    vb.memory = 4096
+    vb.cpus = 2
     # you need this for openstack guests to talk to each other
     vb.customize ["modifyvm", :id, "--nicpromisc2", "allow-all"]
     # if specified assign a static MAC address
@@ -110,9 +112,9 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   #
   # The boot time is long for these, so I recommend that you convert to a local
   # version as soon as you can.
-  config.vm.box = conf['box_name'] || 'ubuntu/xenial64'
+  config.vm.box = conf['box_name'] || 'ubuntu/bionic64'
   config.vm.box_url = conf['box_url'] if conf['box_url']
-
+  config.ssh.private_key_path = "~/.ssh/id_rsa"
   if Vagrant.has_plugin?("vagrant-cachier")
     config.cache.scope = :box
     # see https://github.com/fgrehm/vagrant-cachier/issues/175
@@ -182,4 +184,47 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     config.vm.synced_folder conf['local_openstack_tree'], "/home/vagrant/openstack"
   end
 
+end
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+
+  config.vm.box = "ubuntu/bionic64"
+  config.vm.hostname = 'storage'
+  config.vm.define "storage"
+  config.vm.network "private_network", ip: "192.168.50.4"
+  config.vm.provider "virtualbox" do |vb|
+    #   # Display the VirtualBox GUI when booting the machine
+       vb.gui = true
+    #
+    #   # Customize the amount of memory on the VM:
+    vb.name = "storage"
+    vb.memory = "1524"
+    unless File.exist?("disk-#0-0.vdi")
+      vb.customize ['storagectl', :id,
+                    '--name', 'OSD Controller',
+                    '--add', 'sas']
+    end
+    (0..1).each do |d|
+      vb.customize ['createhd',
+                    '--filename', "disk-#0-#{d}",
+                    '--size', '12000'] unless File.exist?("disk-#0-#{d}.vdi")
+      vb.customize ['storageattach', :id,
+                    '--storagectl', 'OSD Controller',
+                    '--port', 3 + d,
+                    '--device', 0,
+                    '--type', 'hdd',
+                    '--medium', "disk-#0-#{d}.vdi"]
+    end
+    #vb.customize ['modifyvm', :id, '--memory', "#1524"]
+  
+    config.vm.provision "ansible" do |p|
+      p.playbook = "site.yml"
+      p.verbose        = "-vvvv"
+      p.inventory_path = "../vagrantinventory"
+      p.verbose = true
+      p.extra_vars =
+          {
+          }
+    end
+  end
 end
